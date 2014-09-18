@@ -5,6 +5,10 @@
 #include "xathttp.hpp"
 #include "httpcode.hpp"
 
+#define DATA_TYPE_HTML          1
+#define DATA_TYPE_PLAINTEXT     2
+#define DATA_TYPE_BINARY        4
+
 namespace XatHTTP
 {
 
@@ -18,10 +22,12 @@ public:
     const std::string   &   getMethod();
     const std::string   &   getResourcePath();
     const std::string   &   getHttpVersion();
+    const int           &   getDataType();
 
 private:
     Request();
 
+    int                 _dataType;
     std::string         _method;
     std::string         _resourcePath;
     std::string         _httpVersion;

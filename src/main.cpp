@@ -2,9 +2,7 @@
 #include <cstdio>
 
 #include "xathttp.hpp"
-#include "response.hpp"
 #include "server.hpp"
-#include "reader.hpp"
 
 #define DEFAULT_PORT        13510
 
@@ -16,11 +14,11 @@ int main(int argc, char *argv[])
         myport = atoi(argv[1]);
     }
 
-    struct ev_loop *loop = ev_default_loop(0);
+    ev::default_loop loop;
 
-    XatHTTP::Server server(loop, myport);
+    XatHTTP::Server server(myport);
 
-    ev_run(loop, 0);
+    loop.run(0);
 
     return 0;
 }

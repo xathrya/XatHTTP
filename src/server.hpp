@@ -1,13 +1,14 @@
 #ifndef XATHTTP_SERVER_H_
 #define XATHTTP_SERVER_H_
 
-#include <ev.h>
+#include <ev++.h>
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <netdb.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <unistd.h>
+#include <fcntl.h>
 
 #include <exception>
 #include <memory>
@@ -15,35 +16,65 @@
 #include <cstring>
 #include <cstdlib>
 
+#include "httpcode.hpp"
+
 #define BACKLOG                 20
 
-#define CB_ARGS                 struct ev_loop *loop, struct ev_io *watcher, int revents
 
 namespace XatHTTP
 {
 
+/*
+struct Callback
+{
+    static void sockAccept(ev::io &watcher, int revents); //struct ev_loop *loop, struct ev_io *watcher, int revents);
+    static void sockRecv  (ev::io &watcher, int revents); //struct ev_loop *loop, struct ev_io *watcher, int revents);
+    static void sockSend  (ev::io &watcher, int revents); //struct ev_loop *loop, struct ev_io *watcher, int revents);
+};
+*/
+
 class Server
 {
 public:
-    Server(struct ev_loop* loop, short port);
-    ~Server();
-
-    static void acceptCallback(CB_ARGS);
-    static void handleCallback(CB_ARGS);
+    Server(short port);
+    virtual ~Server();
 
     void start();
 
+    void sockAccept(ev::io &watcher, int revents);
+
 private:
     int         _sockfd;
-    addrinfo    _addr;
-    socklen_t   _addr_size;
     short       _port;
     bool        _running;
 
-    int         _yes;
+    ev::io      _io;
+    ev::sig     _sio;
 
-    struct ev_loop  *  _loop;
-};  /* XatHTTP Class */
+    void signalGet(ev::sig &signal, int revents);
+};  /* Server Class */
+
+class Service
+{
+public:
+    Service(int sockfd);
+
+private:
+    ev::io      _io;
+    int         _sockfd;
+
+    std::string _message;
+    int         _length = 0;
+    char       *_data = nullptr;
+    int         _data_type;
+    int         _readStatus;
+
+    ~Service();
+
+    void ioAction (ev::io &watcher, int revents);
+    void sockRecv (ev::io &watcher);
+    void sockSend (ev::io &watcher);
+};
 
 }   /* XatHTTP Namespace */
 

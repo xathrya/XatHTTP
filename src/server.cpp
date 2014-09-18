@@ -1,66 +1,140 @@
 #include "response.hpp"
+#include "request.hpp"
 #include "server.hpp"
 #include "reader.hpp"
 
 namespace XatHTTP
 {
 
-Server::Server(struct ev_loop* loop, short port)
-    : _loop(loop), _port(port), _yes(1), _running(false)
+/* Service:: */
+/***********************************************************************************/
+Service::Service(int sockfd)
+{
+    fcntl(_sockfd, F_SETFL, fcntl(_sockfd, F_GETFL, 0) | O_NONBLOCK);
+
+    _io.set<Service, &Service::ioAction>(this);
+    _io.start(_sockfd, ev::READ | ev::WRITE);
+}
+
+Service::~Service()
+{
+    if (_data) {
+        delete _data;
+    }
+    _io.stop();
+    close(_sockfd);
+}
+
+void Service::ioAction(ev::io &watcher, int revents)
+{
+    if (ev::ERROR & revents) {
+        perror("invalid event");
+        return;
+    }
+
+    if (EV_READ & revents) {
+        sockRecv(watcher);
+    }
+
+    if (EV_WRITE & revents) {
+        sockSend(watcher);
+    }
+}
+
+void Service::sockRecv(ev::io &watcher)
+{
+    char    buffer[4096];
+    ssize_t nread;
+    int     fd;
+
+    nread = recv(watcher.fd, buffer, 4096, 0);
+    if (nread < 0) {
+        perror("read error");
+        return;
+    }
+
+    Request request = Request::parse((byte *) buffer, 4096);
+
+    // XatHTTP::Reader reader = XatHTTP::Reader::Open(request.getFileResourcePath().data);
+
+    std::string filename = "./www/" + request.getResourcePath();
+
+    /*
+    const char *filename = request.getFileResourcePath().data();
+    */
+
+
+    fd = open(filename.data(), O_RDONLY);
+    if (fd < 0) {
+        _readStatus = READ_STATUS_FAIL;
+    } else {
+        _readStatus = READ_STATUS_OK;
+
+        _length = lseek(fd, 0, SEEK_END);
+        _data   = new char[_length];
+        lseek(fd, 0, SEEK_SET);
+        read(fd, _data, _length);
+        close(fd);
+    }
+
+    _data_type = request.getDataType();
+}
+
+void Service::sockSend(ev::io &watcher)
+{
+    auto sendResponse = [&](Response &response) {
+        response.compileHeader();
+
+        send(watcher.fd, response.getCompiledHeader().data(), response.getCompiledHeader().length(), 0);
+        send(watcher.fd, response.getBody(), response.getLength(), 0);
+    };
+
+    if (_readStatus == READ_STATUS_OK) {
+        Response response = Response::create(HTTP_200_OK, (byte *) _data, _length);
+
+        switch(_data_type) {
+        case DATA_TYPE_HTML:
+            response.setContentType(CONTENT_HTML_UTF8);
+            break;
+        case DATA_TYPE_PLAINTEXT:
+            response.setContentType(CONTENT_TEXT_PLAIN);
+            break;
+        }
+
+        sendResponse(response);
+    } else {
+        std::string body = "<!DOCTYPE html>\n<html><head><title>404 Not Found</title></head><body><h1>404 Not Found</h1></body></html>\n";
+        Response response = Response::create(HTTP_404_NOT_FOUND, (byte *) body.data(), body.length());
+        response.setContentType(CONTENT_HTML_UTF8);
+
+        sendResponse(response);
+    }
+
+    delete this;
+}
+
+/* Server:: */
+/***********************************************************************************/
+Server::Server(short port)
+    : _port(port), _running(false)
 {
     
 }
 
 Server::~Server()
 {
-
-}
-
-void Server::acceptCallback(CB_ARGS)
-{
-    struct sockaddr_storage client_addr;
-    socklen_t client_addr_size = sizeof(client_addr);
-    int client_sockfd;
-
-    struct ev_io *w_client = (struct ev_io*) malloc(sizeof(struct ev_io));
-
-    client_sockfd = accept(watcher->fd, (struct sockaddr*) &client_addr, &client_addr_size);
-
-    ev_io_init(w_client, handleCallback, client_sockfd, EV_READ);
-    ev_io_start(loop, w_client);
-}
-
-void Server::handleCallback(CB_ARGS)
-{
-    char buffer[4096];
-
-    memset(buffer, 0, sizeof(buffer));
-    recv(watcher->fd, buffer, 4096, 0);
-    printf("%s", buffer);
-
-
-    std::string body = "<H1>The quick brown fox jumps over the lazy dog</H1>\n";
-    XatHTTP::Response response = XatHTTP::Response::create(HTTP_200_OK, (byte*) body.data(), body.length(), false);
-    response.compileHeader();
-
-    send(watcher->fd, response.getCompiledHeader().data(), response.getCompiledHeader().length(), 0);
-    send(watcher->fd, response.getBody(), response.getLength(), 0);
-
-    ev_io_stop(loop, watcher);
-    shutdown(watcher->fd, 2);
-    free(watcher);
+    close(_sockfd);
 }
 
 void Server::start()
 {
-    struct ev_io w_accept;
-
     // 1. Get the proper address and port
     addrinfo hints;
     addrinfo *servinfo, *p;
     char port_buffer[10];
     char ipvr_buffer[INET6_ADDRSTRLEN];
     void* addr;
+    int yes = 1;
 
     sprintf(port_buffer, "%d", _port);
 
@@ -83,7 +157,7 @@ void Server::start()
             continue;
         }
 
-        if (setsockopt(_sockfd, SOL_SOCKET, SO_REUSEADDR, &_yes, sizeof(int)) < 0) {
+        if (setsockopt(_sockfd, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(int)) < 0) {
             perror("setsockopt error");
             throw "setsockopt error";
         }
@@ -94,6 +168,8 @@ void Server::start()
             perror("server: bind");
             continue;
         }
+
+        fcntl(_sockfd, F_SETFL, fcntl(_sockfd, F_GETFL, 0) | O_NONBLOCK);
 
         if (p->ai_family == AF_INET) {
             sockaddr_in *ipv4 = (sockaddr_in *) p->ai_addr;
@@ -129,13 +205,39 @@ void Server::start()
 
     printf("Server listening on address %s port %d", ipvr_buffer, _port);
 
-    ev_io_init(&w_accept, acceptCallback, _sockfd, EV_READ);
-    ev_io_start(_loop, 0);
+    //ev_io_init(&w_accept, Callback::sockAccept, _sockfd, EV_READ);
+    //ev_io_start(_loop, &w_accept);
 
-    while(_running) {
-        ev_loop(_loop, 0);
-    }
+    _io.set<Server, &Server::sockAccept>(this);
+    _io.start(_sockfd, ev::READ);
+    
+    _sio.set<Server, &Server::signalGet>(this);
+    _sio.start(SIGINT);
 }
 
+void Server::sockAccept(ev::io &watcher, int revents)
+{
+    if (EV_ERROR & revents) {
+        perror("invalid event");
+        return;
+    }
+    
+    sockaddr_storage client_addr;
+    socklen_t client_addr_size = sizeof(client_addr);
+
+    int client_sockfd = accept(watcher.fd, (struct sockaddr*) &client_addr, &client_addr_size);
+
+    if (client_sockfd < 0) {
+        perror("accept error");
+        return;
+    }
+
+    Service *client = new Service(client_sockfd);
+}
+
+void Server::signalGet(ev::sig &signal, int revents)
+{
+    signal.loop.break_loop();
+}
 
 }

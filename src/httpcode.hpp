@@ -1,7 +1,6 @@
 #ifndef XATHTTP_HTTP_CODE_H_
 #define XATHTTP_HTTP_CODE_H_
 
-
 #define CRLF "\r\n"
 
 /* HTTP Version */
@@ -25,6 +24,7 @@
 #define HEADER_CONNECTION       "Connection"
 
 #define CONTENT_HTML_UTF8       "text/html; charset=utf-8"
+#define CONTENT_TEXT_PLAIN      "text/plain"
 #define CONNECTION_CLOSE        "Close"
 
 
